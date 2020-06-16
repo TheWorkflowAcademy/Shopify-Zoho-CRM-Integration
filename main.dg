@@ -1,0 +1,160 @@
+// Get Order Object
+order = zoho.crm.getRecordById("Shopify_Orders",ORDER_ID);
+email = order.get("Email");
+firstName = order.get("First_Name");
+lastName = order.get("Last_Name");
+orderNumber = order.get("Order_Number");
+
+// Get the Line Item Text from Object
+lineItemText = order.get("Line_Items");
+info "Line Items: " + lineItemText;
+
+/*
+ * Set up item parsing values
+ */
+// Item delimiter is the characters that separate line items in the string
+ITEM_DELIMITER = "&&";
+
+// Count of Items in the Line Items String (Delimiter values only occur between items, hence the "+ 1" at the end of the equation)
+itemCount = lineItemText.getOccurenceCount(ITEM_DELIMITER) + 1;
+
+// Assists in looping through the line items
+itemIterator = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49};
+
+/*
+ * Set up field parsing values
+ */
+// Field delimiter is the characters that separates fields in the line item
+FIELD_DELIMITER = "??";
+
+// Count of Fields in the Line Items String (Delimiter values only occur between items, hence the "+ 1" at the end of the equation)
+fieldCount = lineItemText.getOccurenceCount(FIELD_DELIMITER) / itemCount + 1;
+
+// Assists in looping through the line items
+fieldIterator = {0,1,2,3,4,5,6,7,8,9};
+
+/*
+ * Delimit Line Items and Fields
+ */
+// Remaining items will be parsed and reduced with each iteration
+remainingItems = lineItemText;
+
+// Loop over Line Items
+lineItemsList = List();
+for each index i in itemIterator
+{
+	// This is how we determine how many times we will run the loop
+	if(i < itemCount)
+	{
+        // Find the next occurence of the Item Delimiter (if none, returns -1)
+		itemDelimiterPos = remainingItems.find(ITEM_DELIMITER);
+		if(itemDelimiterPos > 0)
+		{
+            // Item Delimiter Found
+			lineItem = remainingItems.subString(0,itemDelimiterPos);
+			remainingItems = remainingItems.subString(itemDelimiterPos + ITEM_DELIMITER.length());
+		}
+		else
+		{
+			// Item Delimiter Not Found (One Line Item remaining)
+			lineItem = remainingItems;
+			remainingItems = null;
+		}
+		info "_________________________";
+		info "ITEM " + i + ": " + lineItem;
+
+		// Loop over fields
+		lineItemMap = Map();
+		remainingFields = lineItem;
+		for each index j in fieldIterator
+		{
+			// Limits loop to number of present fields
+			if(j < fieldCount)
+			{
+				field = "";
+				fieldLabel = "";
+				fieldValue = "";
+
+				// Find the next occurence of the Field Delimiter (if none, returns -1)
+				fieldDelimiterPos = remainingFields.find(FIELD_DELIMITER);
+				if(fieldDelimiterPos > 0)
+				{
+					// Field Delimiter Found | Put field into Line Item Map
+					field = remainingFields.subString(0,fieldDelimiterPos);
+					remainingFields = remainingFields.subString(fieldDelimiterPos + FIELD_DELIMITER.length());
+				}
+				else
+				{
+					// Field Delimiter Not Found
+					field = remainingFields;
+					remainingFields = null;
+				}
+				fieldLabel = field.subString(0,field.find(":"));
+				fieldValue = field.subString(field.find(":") + 1);
+				lineItemMap.put(fieldLabel,fieldValue);
+				info field;
+			}
+		}
+		lineItemsList.add(lineItemMap);
+		info lineItemMap;
+	}
+}
+
+/*
+ * GET CONTACT INFORMATION OR CREATE CONTACT
+ */
+contact = null;
+searchContacts = zoho.crm.searchRecords("Contacts","(Email:equals:" + email + ")");
+if(!searchContacts.isEmpty())
+{
+	contact = searchContacts.get(0);
+}
+else
+{
+	newContactMap = Map();
+	newContactMap.put("Email",email);
+	newContactMap.put("First_Name",firstName);
+	newContactMap.put("Last_Name",lastName);
+	newContact = zoho.crm.createRecord("Contacts",newContactMap);
+	info newContact;
+	contactId = newContact.get("id");
+	contact = zoho.crm.getRecordById("Contacts",contactId);
+}
+
+// Add Contact to Order Record
+updateOrder = zoho.crm.updateRecord("Shopify_Orders",ORDER_ID,{"Contact":contact.get("id")});
+info updateOrder;
+
+// Create Line Item records
+for each  lineItem in lineItemsList
+{
+	lineItem.put("Name","#" + orderNumber + " | " + lineItem.get("Item") + " | " + firstName + " " + lastName);
+	lineItem.put("Order_Number",orderNumber);
+	lineItem.put("Contact",contact.get("id"));
+	lineItem.put("Shopify_Order",ORDER_ID);
+	newLineItem = zoho.crm.createRecord("Shopify_Order_Line_Items",lineItem);
+	info newLineItem;
+}
+
+// Update Contact Purchase History
+updateContactMap = Map();
+contactOrders = zoho.crm.getRelatedRecords("Shopify_Orders","Contacts",contact.get("id"));
+lifetimeValue = 0;
+itemCount = 0;
+for each  contactOrder in contactOrders
+{
+	total = contactOrder.get("Total");
+	lifetimeValue = lifetimeValue + total;
+	orderLineItems = zoho.crm.getRelatedRecords("Shopify_Order_Line_Items","Shopify_Orders",contactOrder.get("id"));
+	for each  orderLineItem in orderLineItems
+	{
+		quantity = orderLineItem.get("Quantity").toNumber();
+		itemCount = itemCount + quantity;
+	}
+}
+updateContactMap.put("Lifetime_Value",lifetimeValue);
+updateContactMap.put("Last_Order_Date",order.get("Date"));
+updateContactMap.put("Order_Count",contactOrders.size());
+updateContactMap.put("Item_Count",itemCount);
+updateContact = zoho.crm.updateRecord("Contacts",contact.get("id"),updateContactMap);
+info updateContact;
